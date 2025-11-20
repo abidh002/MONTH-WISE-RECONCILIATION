@@ -1,6 +1,3 @@
-import sys
-if 'streamlit' not in sys.modules:
-  !pip install streamlit
 import streamlit as st
 import pandas as pd
 from io import BytesIO
@@ -12,7 +9,7 @@ st.markdown("### Step 1: Download Templates")
 
 col1, col2 = st.columns(2)
 with col1:
-    # Updated Submission Template including MONTH column
+    # Submission template with Month column
     st.download_button(
         "📥 Download Submission Template",
         data="Invoice,Member ID,Amount,Month\nINV001,12345,1000,2025-01\nINV002,56789,2000,2025-02\nINV003,11111,1500,2025-03",
@@ -21,6 +18,7 @@ with col1:
     )
 
 with col2:
+    # Remittance template
     st.download_button(
         "📥 Download Remittance Template (with Transaction Date)",
         data="Invoice,Transaction Date,Amount\nINV001,2025-10-22 09:30,800\nINV002,2025-10-23 12:15,2000",
@@ -51,7 +49,7 @@ if sub_file and rem_file:
         submission_df.columns = submission_df.columns.str.strip().str.title()
         remittance_df.columns = remittance_df.columns.str.strip().str.title()
 
-        # Updated required columns (includes MONTH)
+        # Validate required columns
         required_sub_cols = {"Invoice", "Amount", "Month"}
         required_rem_cols = {"Invoice", "Transaction Date", "Amount"}
 
@@ -63,12 +61,9 @@ if sub_file and rem_file:
             # Convert data types
             submission_df["Amount"] = pd.to_numeric(submission_df["Amount"], errors="coerce").fillna(0)
             remittance_df["Amount"] = pd.to_numeric(remittance_df["Amount"], errors="coerce").fillna(0)
-            remittance_df["Transaction Date"] = pd.to_datetime(remittance_df["Transaction Date"], errors="coerce")
+            remittance_df["Transaction Date"] = pd.to_datetime(remittance_df["Transaction Date"], errors="coerce").dt.date
 
-            # Keep only date (remove time)
-            remittance_df["Transaction Date"] = remittance_df["Transaction Date"].dt.date
-
-            # Aggregate Submission by INVOICE & MONTH
+            # Aggregate Submission by Invoice & Month
             submission_agg = submission_df.groupby(["Invoice", "Month"], as_index=False)["Amount"].sum()
             submission_agg.rename(columns={"Amount": "Total_Submitted"}, inplace=True)
 
@@ -79,7 +74,7 @@ if sub_file and rem_file:
             })
             remittance_agg.rename(columns={"Amount": "Total_Received", "Transaction Date": "Transaction_Date"}, inplace=True)
 
-            # LEFT MERGE (preserve all invoices & month)
+            # Merge
             result = pd.merge(
                 submission_agg,
                 remittance_agg,
@@ -87,7 +82,7 @@ if sub_file and rem_file:
                 how="left"
             )
 
-            # Fill missing values
+            # Calculate difference
             result["Total_Received"] = pd.to_numeric(result["Total_Received"], errors="coerce").fillna(0)
             result["Difference"] = result["Total_Submitted"] - result["Total_Received"]
 
@@ -104,7 +99,7 @@ if sub_file and rem_file:
 
             result["Status"] = result.apply(get_status, axis=1)
 
-            # Reorder columns (Month included)
+            # Reorder columns
             result = result[[
                 "Invoice", "Month", "Total_Submitted", "Total_Received",
                 "Difference", "Transaction_Date", "Status"
@@ -115,7 +110,7 @@ if sub_file and rem_file:
             result["_sort"] = result["Status"].map(status_order)
             result = result.sort_values("_sort").drop("_sort", axis=1).reset_index(drop=True)
 
-            #✨ Summary Section
+            # Summary Metrics
             st.markdown("### 📊 Summary Statistics")
             col1, col2, col3, col4 = st.columns(4)
 
@@ -134,7 +129,6 @@ if sub_file and rem_file:
 
             # Color-coded Table
             st.markdown("### 🔍 Reconciliation Result")
-
             def highlight_status(row):
                 if row["Status"] == "❌ Not Received":
                     return ['background-color: #ffcccc'] * len(row)
@@ -144,14 +138,14 @@ if sub_file and rem_file:
                     return ['background-color: #d4edda'] * len(row)
                 return [''] * len(row)
 
-            styled_result = result.style.apply(highlight_status, axis=1)
-            st.dataframe(styled_result, use_container_width=True)
+            st.dataframe(result.style.apply(highlight_status, axis=1), use_container_width=True)
 
-            # Export to EXCEL (Includes Month)
+            # Download Excel
             buffer = BytesIO()
             with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
                 result.to_excel(writer, index=False, sheet_name="Reconciliation")
             buffer.seek(0)
+
             st.download_button(
                 label="📊 Download Reconciliation Result (With Month)",
                 data=buffer.getvalue(),
