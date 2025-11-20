@@ -46,11 +46,11 @@ if sub_file and rem_file:
         else:
             remittance_df = pd.read_excel(rem_file, dtype=str)
 
-        # Clean columns
+        # Clean column names
         submission_df.columns = submission_df.columns.str.strip().str.title()
         remittance_df.columns = remittance_df.columns.str.strip().str.title()
 
-        # Validate columns
+        # Validate required columns
         required_sub_cols = {"Month", "Invoice", "Member Id", "Transaction Date", "Amount"}
         required_rem_cols = {"Invoice", "Payment Reference", "Settlement Date", "Amount"}
 
@@ -63,7 +63,7 @@ if sub_file and rem_file:
             submission_df["Amount"] = pd.to_numeric(submission_df["Amount"], errors="coerce").fillna(0)
             remittance_df["Amount"] = pd.to_numeric(remittance_df["Amount"], errors="coerce").fillna(0)
 
-            # Convert dates to datetime
+            # Convert dates
             submission_df["Transaction Date"] = pd.to_datetime(submission_df["Transaction Date"], dayfirst=True, errors='coerce').dt.date
             remittance_df["Settlement Date"] = pd.to_datetime(remittance_df["Settlement Date"], dayfirst=True, errors='coerce').dt.date
 
@@ -75,7 +75,7 @@ if sub_file and rem_file:
             remittance_agg = remittance_df.groupby(["Invoice", "Payment Reference", "Settlement Date"], as_index=False)["Amount"].sum()
             remittance_agg.rename(columns={"Amount": "Remittance_Amount"}, inplace=True)
 
-            # Merge
+            # LEFT JOIN: keep all submission records
             result = pd.merge(
                 submission_agg,
                 remittance_agg,
@@ -83,14 +83,24 @@ if sub_file and rem_file:
                 how="left"
             )
 
-            # Fill missing values
+            # Fill missing remittance info
             result["Remittance_Amount"] = result["Remittance_Amount"].fillna(0)
-            result["Payment Reference"] = result["Payment Reference"].fillna("N/A")
+            result["Payment Reference"] = result["Payment Reference"].fillna("Pending")
             result["Settlement Date"] = result["Settlement Date"].astype(str).replace("NaT", "")
 
-            # Difference and Status
+            # Difference
             result["Difference"] = result["Submission_Amount"] - result["Remittance_Amount"]
-            result["Status"] = result["Difference"].apply(lambda x: "Matched" if x==0 else "Not Matched")
+
+            # Status
+            def get_status(row):
+                if row["Remittance_Amount"] == 0:
+                    return "Pending from Insurance"
+                elif row["Difference"] == 0:
+                    return "Matched"
+                else:
+                    return "Not Matched"
+
+            result["Status"] = result.apply(get_status, axis=1)
 
             # Reorder columns
             result = result[[
@@ -99,12 +109,12 @@ if sub_file and rem_file:
             ]]
 
             # Display in Streamlit
-            st.markdown("### 🔍 Reconciliation Result")
+            st.markdown("### 🔍 Reconciliation Result (All Submission Data)")
             def highlight_status(row):
-                if row["Status"] == "Not Matched":
-                    return ['background-color: #fff3cd'] * len(row)  # Light Orange
-                else:
+                if row["Status"] == "Matched":
                     return ['background-color: #d4edda'] * len(row)  # Light Green
+                else:
+                    return ['background-color: #fff3cd'] * len(row)  # Light Orange for Not Matched / Pending
 
             st.dataframe(result.style.apply(highlight_status, axis=1), use_container_width=True)
 
@@ -114,7 +124,7 @@ if sub_file and rem_file:
                 result.to_excel(writer, index=False, sheet_name="Reconciliation")
             buffer.seek(0)
 
-            # Apply color formatting using openpyxl
+            # Apply color formatting
             wb = load_workbook(buffer)
             ws = wb.active
 
@@ -127,18 +137,18 @@ if sub_file and rem_file:
                 for col in range(1, ws.max_column + 1):
                     ws.cell(row=row, column=col).fill = fill
 
-            # Save back to BytesIO
             export_buffer = BytesIO()
             wb.save(export_buffer)
             export_buffer.seek(0)
 
             st.download_button(
-                label="📊 Download Reconciliation Result (Colored)",
+                label="📊 Download Reconciliation Result (All Submission Data, Colored)",
                 data=export_buffer.getvalue(),
-                file_name="Reconciliation_Result_Colored.xlsx",
+                file_name="Reconciliation_All_Submission.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
 
     except Exception as e:
         st.error(f"❌ Error: {e}")
         st.exception(e)
+
